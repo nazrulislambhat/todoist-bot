@@ -3,38 +3,41 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const TOKEN = process.env.TODOIST_TOKEN;
+const TODOIST_TOKEN = process.env.TODOIST_TOKEN;
+const SLACK_WEBHOOK = process.env.SLACK_WEBHOOK;
+
 const START = new Date('2026-03-09');
 
 function getNextWeekInfo() {
   const now = new Date();
+  const START = new Date('2026-03-09');
 
   const diffWeeks = Math.floor((now - START) / (1000 * 60 * 60 * 24 * 7));
 
   const weekType =
     diffWeeks % 2 === 0 ? '🚀 Development Week' : '🌿 Light Week';
 
-  const startOfWeek = new Date(now);
-  startOfWeek.setDate(now.getDate() + (8 - now.getDay())); // next Monday
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + (8 - now.getDay()));
 
-  const endOfWeek = new Date(startOfWeek);
-  endOfWeek.setDate(startOfWeek.getDate() + 4); // Friday
+  const friday = new Date(monday);
+  friday.setDate(monday.getDate() + 4);
 
   const options = { month: 'short', day: 'numeric' };
 
-  const startLabel = startOfWeek.toLocaleDateString('en-US', options);
-  const endLabel = endOfWeek.toLocaleDateString('en-US', options);
+  const start = monday.toLocaleDateString('en-US', options);
+  const end = friday.toLocaleDateString('en-US', options);
 
-  return `${weekType} (${startLabel}–${endLabel})`;
+  const text = `${weekType} (${start}–${end})`;
+
+  return { text, weekType, start, end };
 }
 
-async function createTask() {
-  const content = getNextWeekInfo();
-
+async function createTodoistTask(content) {
   await fetch('https://api.todoist.com/rest/v2/tasks', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${TOKEN}`,
+      Authorization: `Bearer ${TODOIST_TOKEN}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
@@ -43,8 +46,57 @@ async function createTask() {
       priority: 3,
     }),
   });
-
-  console.log('Task created:', content);
 }
 
-createTask();
+async function sendSlack(content, weekType, start, end) {
+  await fetch(process.env.SLACK_WEBHOOK, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      blocks: [
+        {
+          type: 'header',
+          text: {
+            type: 'plain_text',
+            text: '🏢 Office Week Reminder',
+          },
+        },
+        {
+          type: 'section',
+          fields: [
+            {
+              type: 'mrkdwn',
+              text: `*Week Type*\n${weekType}`,
+            },
+            {
+              type: 'mrkdwn',
+              text: `*Dates*\n${start} – ${end}`,
+            },
+          ],
+        },
+        {
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: 'Automated by Todoist Week Bot',
+            },
+          ],
+        },
+      ],
+    }),
+  });
+}
+
+async function run() {
+  const data = getNextWeekInfo();
+
+  await createTodoistTask(data.text);
+  await sendSlack(data.text, data.weekType, data.start, data.end);
+
+  console.log('Sent notifications:', data.text);
+}
+
+run();
